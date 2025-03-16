@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Todo List App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Enhanced Todo List</h1>
+        <div class="card">
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col">
+                        <select id="sort-tasks" class="form-control">
+                            <option value="id">Sort by Created</option>
+                            <option value="priority">Sort by Priority</option>
+                            <option value="dueDate">Sort by Due Date</option>
+                        </select>
+                    </div>
+                    <div class="col">
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-outline-secondary" onclick="filterTasks('all')">All</button>
+                            <button class="btn btn-outline-secondary" onclick="filterTasks('active')">Active</button>
+                            <button class="btn btn-outline-secondary" onclick="filterTasks('completed')">Completed</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="task-input" placeholder="Enter a new task">
+                    <input type="date" class="form-control" id="due-date-input">
+                    <select class="form-control" id="priority-input">
+                        <option value="1">Low Priority</option>
+                        <option value="2">Medium Priority</option>
+                        <option value="3">High Priority</option>
+                    </select>
+                    <div class="input-group-append">
+                        <button class="btn btn-primary" id="add-task">Add Task</button>
+                    </div>
+                </div>
+
+                <div id="error-message" class="text-danger mb-3"></div>
+                <div id="stats" class="mb-3">
+                    <small class="text-muted">
+                        Total: <span id="total-tasks">0</span> |
+                        Completed: <span id="completed-tasks">0</span> |
+                        Remaining: <span id="remaining-tasks">0</span>
+                    </small>
+                </div>
+                <ul class="list-group" id="task-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFilter = 'all';
+        
+        async function fetchTasks() {
+            try {
+                const sortBy = document.getElementById('sort-tasks').value;
+                const response = await fetch(`/api/tasks?sort=${sortBy}`);
+                if (!response.ok) throw new Error('Failed to fetch tasks');
+                
+                const tasks = await response.json();
+                displayTasks(tasks);
+                updateStats(tasks);
+            } catch (error) {
+                document.getElementById('error-message').innerText = 'Failed to load tasks';
+            }
+        }
+
+        function displayTasks(tasks) {
+            const taskList = document.getElementById('task-list');
+            taskList.innerHTML = '';
+
+            const filteredTasks = filterTasksList(tasks, currentFilter);
+            
+            filteredTasks.forEach(task => {
+                const taskElement = document.createElement('li');
+                taskElement.classList.add('list-group-item', 'd-flex', 'justify-content-between', 'align-items-center');
+                if (task.completed) taskElement.classList.add('bg-light');
+                
+                const priorityClass = getPriorityClass(task.priority);
+                
+                taskElement.innerHTML = `
+                    <div class="d-flex align-items-center flex-grow-1">
+                        <input type="checkbox" class="mr-3" 
+                               ${task.completed ? 'checked' : ''} 
+                               onchange="toggleTask('${task._id}')">
+                        <input type="text" value="${task.title}" 
+                               id="edit-task-${task._id}" 
+                               class="form-control ${task.completed ? 'text-muted' : ''}" 
+                               disabled>
+                        <span class="badge ${priorityClass} ml-2">P${task.priority}</span>
+                        ${task.dueDate ? `<small class="text-muted ml-2">${new Date(task.dueDate).toLocaleDateString()}</small>` : ''}
+                    </div>
+                    <div>
+                        <button class="btn btn-success btn-sm" onclick="editTask('${task._id}')">Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteTask('${task._id}')">Delete</button>
+                    </div>
+                `;
+                taskList.appendChild(taskElement);
+            });
+        }
+
+        function getPriorityClass(priority) {
+            switch(parseInt(priority)) {
+                case 3: return 'badge-danger';
+                case 2: return 'badge-warning';
+                default: return 'badge-info';
+            }
+        }
+
+        function filterTasksList(tasks, filter) {
+            switch(filter) {
+                case 'active': return tasks.filter(task => !task.completed);
+                case 'completed': return tasks.filter(task => task.completed);
+                default: return tasks;
+            }
+        }
+
+        function filterTasks(filter) {
+            currentFilter = filter;
+            fetchTasks();
+        }
+
+        function updateStats(tasks) {
+            const total = tasks.length;
+            const completed = tasks.filter(t => t.completed).length;
+            const remaining = total - completed;
+
+            document.getElementById('total-tasks').textContent = total;
+            document.getElementById('completed-tasks').textContent = completed;
+            document.getElementById('remaining-tasks').textContent = remaining;
+        }
+
+        async function toggleTask(id) {
+            try {
+                const response = await fetch(`/api/tasks/${id}/toggle`, {
+                    method: 'PATCH'
+                });
+                if (!response.ok) throw new Error('Failed to toggle task');
+                await fetchTasks();
+            } catch (error) {
+                document.getElementById('error-message').innerText = 'Failed to update task';
+            }
+        }
+
+        async function addTask() {
+            try {
+                const input = document.getElementById('task-input');
+                const title = input.value.trim();
+                const priority = document.getElementById('priority-input').value;
+                const dueDate = document.getElementById('due-date-input').value;
+                
+                const errorMessage = document.getElementById('error-message');
+                errorMessage.innerText = '';
+
+                if (!title) {
+                    errorMessage.innerText = 'Task cannot be empty.';
+                    return;
+                }
+
+                const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, priority, dueDate })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    errorMessage.innerText = error.message;
+                    return;
+                }
+
+                input.value = '';
+                document.getElementById('due-date-input').value = '';
+                await fetchTasks();
+            } catch (error) {
+                document.getElementById('error-message').innerText = 'Failed to add task';
+            }
+        }
+
+        async function editTask(id) {
+            const inputField = document.getElementById(`edit-task-${id}`);
+            const currentButtons = inputField.parentElement.nextElementSibling;
+            
+            // Enable editing
+            inputField.disabled = false;
+            inputField.focus();
+            
+            // Change buttons to show Save/Cancel
+            currentButtons.innerHTML = `
+                <button class="btn btn-success btn-sm" onclick="saveTask('${id}')">Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="cancelEdit('${id}')">Cancel</button>
+            `;
+        }
+
+        async function saveTask(id) {
+            try {
+                const inputField = document.getElementById(`edit-task-${id}`);
+                const newTitle = inputField.value.trim();
+                
+                if (!newTitle) {
+                    document.getElementById('error-message').innerText = 'Task title cannot be empty';
+                    return;
+                }
+                
+                const response = await fetch(`/api/tasks/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle })
+                });
+                
+                if (!response.ok) throw new Error('Failed to update task');
+                
+                inputField.disabled = true;
+                await fetchTasks(); // Refresh the task list
+            } catch (error) {
+                document.getElementById('error-message').innerText = 'Failed to update task';
+            }
+        }
+
+        async function cancelEdit(id) {
+            await fetchTasks(); // This will reset the view to its original state
+        }
+
+        async function deleteTask(id) {
+            try {
+                const response = await fetch(`/api/tasks/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) throw new Error('Failed to delete task');
+                await fetchTasks();
+            } catch (error) {
+                document.getElementById('error-message').innerText = 'Failed to delete task';
+            }
+        }
+
+        document.getElementById('add-task').addEventListener('click', addTask);
+        document.getElementById('sort-tasks').addEventListener('change', fetchTasks);
+        document.getElementById('task-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') addTask();
+        });
+
+        // Initial load
+        fetchTasks();
+    </script>
+</body>
+</html>
